@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Self test — Label Plate Composer</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <h1>Automated self-test</h1>
+    <form id="compose-form" class="form">
+      <input id="label-files" type="file" multiple />
+      <input id="excel-file" type="file" />
+      <input id="layout-file" type="file" />
+      <input id="date-text" type="text" value="22.04.2026" />
+      <input id="done-by" type="text" value="SelfTest" />
+      <button type="submit" id="generate-btn">Generate</button>
+      <button type="button" id="reset-btn" class="ghost">Reset</button>
+    </form>
+    <div class="progress"><div id="progress-bar"></div></div>
+    <p id="status-text">boot</p>
+    <ul id="log" class="log"></ul>
+    <section id="preview-section" class="preview hidden">
+      <div id="plate-summary"></div>
+      <a id="download-link" class="download hidden" download="out.pdf">Download</a>
+    </section>
+    <pre id="out"></pre>
+  </div>
+  <script src="app.js"></script>
+  <script>
+    async function fetchFile(path, type) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error("fetch failed " + path);
+      const blob = await res.blob();
+      return new File([blob], path.split("/").pop(), { type });
+    }
+
+    (async () => {
+      const out = document.getElementById("out");
+      try {
+        const outlineNames = [
+          "BD01485474W_19 - DUNNEST019_4541141_45619_BROWN - Outline.pdf",
+          "BD01486551W_19 - DUNNEST019_4541142_45542_TAUPE - outline.pdf",
+          "BD01486575W_19 - DUNNEST019_4541142_45528_BURGUNDY - Outline.pdf",
+          "BD01486576W_19 - DUNNEST019_4541142_45528_DARK GREEN -Outline.pdf",
+          "BD01486579W_19 - DUNNEST019_4541142_45528_RED - Outline.pdf",
+          "BD01486580W_19 - DUNNEST019_4541142_45528_TAUPE- Outline.pdf",
+          "BD01489110W_19 - DUNNEST019_4547897_53671_CHARCOAL - Outline.pdf",
+        ];
+        const labelFiles = [];
+        for (const n of outlineNames) {
+          labelFiles.push(await fetchFile("outlines/" + encodeURIComponent(n), "application/pdf"));
+        }
+        // Ensure File.name keeps real spaces (not %20)
+        for (let i = 0; i < labelFiles.length; i++) {
+          labelFiles[i] = new File([labelFiles[i]], outlineNames[i], { type: "application/pdf" });
+        }
+        const excelFile = await fetchFile("ratio-master.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        const layoutFile = await fetchFile("layout-master.pdf", "application/pdf");
+
+        const dtLabels = new DataTransfer();
+        labelFiles.forEach((f) => dtLabels.items.add(f));
+        document.getElementById("label-files").files = dtLabels.files;
+        const dtExcel = new DataTransfer();
+        dtExcel.items.add(excelFile);
+        document.getElementById("excel-file").files = dtExcel.files;
+        const dtLayout = new DataTransfer();
+        dtLayout.items.add(layoutFile);
+        document.getElementById("layout-file").files = dtLayout.files;
+
+        document.getElementById("compose-form").requestSubmit();
+
+        const start = Date.now();
+        const timer = setInterval(() => {
+          const link = document.getElementById("download-link");
+          const status = document.getElementById("status-text").textContent;
+          out.textContent = status + "\n\n" + document.getElementById("log").innerText;
+          if (!link.classList.contains("hidden")) {
+            clearInterval(timer);
+            out.textContent += "\n\nSUCCESS";
+            window.__TEST_OK = true;
+          } else if (/^Error:/i.test(status) || Date.now() - start > 180000) {
+            clearInterval(timer);
+            window.__TEST_OK = false;
+          }
+        }, 400);
+      } catch (e) {
+        out.textContent = String(e.stack || e);
+        window.__TEST_OK = false;
+      }
+    })();
+  </script>
+</body>
+</html>

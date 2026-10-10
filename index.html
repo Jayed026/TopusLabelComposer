@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Label Plate Composer</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <p class="eyebrow">Dunnes 26-up</p>
+      <h1>Label Plate Composer</h1>
+      <p class="lede">
+        Upload outline label PDFs, the ratio Excel, and any compatible master layout PDF.
+        Slots are detected from the layout’s cut boxes; Excel maps sizes onto plates A–D.
+      </p>
+    </header>
+
+    <main class="panel">
+      <form id="compose-form" class="form">
+        <label class="field">
+          <span class="field-label">1. Label outline PDFs</span>
+          <span class="field-hint">Multiple files — one per style (filename must contain style ID, e.g. BD01485474W)</span>
+          <input id="label-files" type="file" accept="application/pdf,.pdf" multiple required />
+        </label>
+
+        <label class="field">
+          <span class="field-label">2. Ratio master Excel</span>
+          <span class="field-hint">Defines size, EAN, plate counts (A/B/C/D), and impression totals</span>
+          <input id="excel-file" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+        </label>
+
+        <label class="field">
+          <span class="field-label">3. Result layout PDF</span>
+          <span class="field-hint">Master template with ~30×74 mm cut boxes — slots are detected automatically from the PDF</span>
+          <input id="layout-file" type="file" accept="application/pdf,.pdf" required />
+        </label>
+
+        <div class="meta-row">
+          <label class="field compact">
+            <span class="field-label">Date text</span>
+            <input id="date-text" type="text" placeholder="22.04.2026" />
+          </label>
+          <label class="field compact">
+            <span class="field-label">Done by</span>
+            <input id="done-by" type="text" placeholder="Your name" value="Composer" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit" id="generate-btn">Generate final PDF</button>
+          <button type="button" id="reset-btn" class="ghost">Reset</button>
+        </div>
+      </form>
+
+      <section class="status" aria-live="polite">
+        <div class="progress"><div id="progress-bar"></div></div>
+        <p id="status-text">Waiting for files…</p>
+        <ul id="log" class="log"></ul>
+      </section>
+
+      <section id="preview-section" class="preview hidden">
+        <h2>Plate plan</h2>
+        <div id="plate-summary" class="plate-summary"></div>
+        <a id="download-link" class="download hidden" download="composed-plates.pdf">Download composed PDF</a>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
