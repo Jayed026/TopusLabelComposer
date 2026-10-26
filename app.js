@@ -4,7 +4,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 const PLATES = ["A", "B", "C", "D"];
-const RENDER_SCALE = 2.5;
 /** 30×74 mm label short/long sides in PDF points (±tolerance). */
 const LABEL_SHORT_MIN = 78;
 const LABEL_SHORT_MAX = 95;
@@ -76,7 +75,7 @@ async function runCompose() {
         `(${layout.slots.filter((s) => s.orient === "H").length} H / ${layout.slots.filter((s) => s.orient === "V").length} V)`
     );
 
-    setProgress(20, "Extracting labels from outline PDFs…");
+    setProgress(20, "Reading vector labels from outline PDFs…");
     const labelMap = await extractLabelsFromOutlines(labelFiles, ratio.rows);
     log(`Matched label artworks: ${Object.keys(labelMap).length}`);
 
@@ -259,24 +258,24 @@ async function extractLabelsFromOutlines(files, excelRows) {
       `Reading outline ${index}/${files.length}: ${style}`
     );
 
-    const frames = await findLabelFrames(file);
+    const buffer = await file.arrayBuffer();
+    const frames = await findLabelFrames(buffer);
     if (frames.length !== expected.length) {
       throw new Error(
         `${style}: found ${frames.length} label frames but Excel has ${expected.length} sizes.`
       );
     }
 
-    const pageImage = await renderPdfPageToCanvas(file, 0, RENDER_SCALE);
     frames.forEach((frame, i) => {
       const row = expected[i];
       const key = labelKey(row.style, row.ean || row.size);
-      const crop = cropCanvas(pageImage.canvas, frame, pageImage.scale, pageImage.pageHeight);
       labelMap[key] = {
         style: row.style,
         size: row.size,
         ean: row.ean,
-        canvas: crop,
         fileName: file.name,
+        pdfBytes: buffer,
+        clip: { x: frame.x, y: frame.y, w: frame.w, h: frame.h },
       };
     });
 
@@ -315,41 +314,20 @@ function labelKey(style, eanOrSize) {
 }
 
 /**
- * Find 30×74mm portrait label frames in outline PDFs (inflated content streams).
+ * Find 30×74mm portrait label frames in outline PDFs.
+ * Rects are PDF user space (origin at the bottom-left), top of page first.
  */
-async function findLabelFrames(file) {
-  const buffer = await file.arrayBuffer();
+async function findLabelFrames(buffer) {
   const pageHeight = await getFirstPageHeight(buffer);
   let frames = await extractLabelSizedRectsFromPdf(buffer, pageHeight, { bothOrients: false });
-  // convert PDF bottom-left → visual top-left for canvas crop
-  frames = frames
-    .sort((a, b) => {
-      const rowDiff = Math.round(b.y / 8) - Math.round(a.y / 8);
-      if (rowDiff !== 0) return rowDiff;
-      return a.x - b.x;
-    })
-    .map((f) => ({
-      x: f.x,
-      y: pageHeight - f.y - f.h,
-      w: f.w,
-      h: f.h,
-    }));
-
   if (!frames.length) {
-    const viaOps = await extractLabelSizedRectsViaOps(buffer, pageHeight, { bothOrients: false });
-    frames = viaOps
-      .sort((a, b) => {
-        const rowDiff = Math.round(b.y / 8) - Math.round(a.y / 8);
-        if (rowDiff !== 0) return rowDiff;
-        return a.x - b.x;
-      })
-      .map((f) => ({
-        x: f.x,
-        y: pageHeight - f.y - f.h,
-        w: f.w,
-        h: f.h,
-      }));
+    frames = await extractLabelSizedRectsViaOps(buffer, pageHeight, { bothOrients: false });
   }
+  frames.sort((a, b) => {
+    const rowDiff = Math.round(b.y / 8) - Math.round(a.y / 8);
+    if (rowDiff !== 0) return rowDiff;
+    return a.x - b.x;
+  });
   if (!frames.length) {
     throw new Error("Could not detect label frames in outline PDF.");
   }
@@ -496,37 +474,6 @@ function dedupeFrames(frames) {
   return out;
 }
 
-async function renderPdfPageToCanvas(file, pageIndex, scale) {
-  const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-  const page = await pdf.getPage(pageIndex + 1);
-  const viewport = page.getViewport({ scale });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.ceil(viewport.width);
-  canvas.height = Math.ceil(viewport.height);
-  const ctx = canvas.getContext("2d", { alpha: false });
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  await page.render({ canvasContext: ctx, viewport }).promise;
-  return { canvas, scale, pageHeight: viewport.height / scale };
-}
-
-function cropCanvas(sourceCanvas, frame, scale) {
-  const sx = Math.max(0, Math.floor(frame.x * scale));
-  const sy = Math.max(0, Math.floor(frame.y * scale));
-  const sw = Math.min(sourceCanvas.width - sx, Math.ceil(frame.w * scale));
-  const sh = Math.min(sourceCanvas.height - sy, Math.ceil(frame.h * scale));
-
-  const out = document.createElement("canvas");
-  out.width = sw;
-  out.height = sh;
-  const ctx = out.getContext("2d");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, sw, sh);
-  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
-  return out;
-}
-
 function buildPlateQueues(rows, labelMap) {
   const queues = { A: [], B: [], C: [], D: [] };
   for (const row of rows) {
@@ -573,6 +520,16 @@ async function composeFinalPdf({
   const pageW = layout.pageW;
   const pageH = layout.pageH;
   const slots = layout.slots;
+  const embeddedBySource = new Map();
+
+  async function embeddedOutline(label) {
+    const cached = embeddedBySource.get(label.pdfBytes);
+    if (cached) return cached;
+    const src = await PDFDocument.load(label.pdfBytes.slice(0));
+    const embedded = await outPdf.embedPage(src.getPages()[0]);
+    embeddedBySource.set(label.pdfBytes, embedded);
+    return embedded;
+  }
 
   for (let p = 0; p < PLATES.length; p++) {
     setProgress(55 + p * 10, `Stamping Plate ${PLATES[p]}…`);
@@ -602,20 +559,59 @@ async function composeFinalPdf({
 
     const queue = plateQueues[plate];
     for (let i = 0; i < slots.length; i++) {
-      const slot = slots[i];
       const label = queue[i];
-      const png = await canvasToPngBytes(label.canvas, slot.orient);
-      const image = await outPdf.embedPng(png);
-      page.drawImage(image, {
-        x: slot.rect.pdfX,
-        y: slot.rect.pdfY,
-        width: slot.rect.w,
-        height: slot.rect.h,
-      });
+      const embedded = await embeddedOutline(label);
+      drawVectorLabel(page, embedded, label.clip, slots[i]);
     }
   }
 
   return outPdf.save();
+}
+
+/**
+ * Stamp one outline label into a slot as a clipped form XObject.
+ * Landscape slots rotate the portrait art 90° clockwise (punch hole to the right).
+ */
+function drawVectorLabel(page, embedded, clipRect, slot) {
+  const { rgb, degrees, pushGraphicsState, popGraphicsState, rectangle, clip, endPath } = PDFLib;
+  const { pdfX, pdfY, w: slotW, h: slotH } = slot.rect;
+  page.drawRectangle({
+    x: pdfX,
+    y: pdfY,
+    width: slotW,
+    height: slotH,
+    color: rgb(1, 1, 1),
+  });
+
+  page.pushOperators(
+    pushGraphicsState(),
+    rectangle(pdfX, pdfY, slotW, slotH),
+    clip(),
+    endPath()
+  );
+
+  if (slot.orient === "H") {
+    const xScale = slotH / clipRect.w;
+    const yScale = slotW / clipRect.h;
+    page.drawPage(embedded, {
+      x: pdfX - clipRect.y * yScale,
+      y: pdfY + slotH + clipRect.x * xScale,
+      xScale,
+      yScale,
+      rotate: degrees(-90),
+    });
+  } else {
+    const xScale = slotW / clipRect.w;
+    const yScale = slotH / clipRect.h;
+    page.drawPage(embedded, {
+      x: pdfX - clipRect.x * xScale,
+      y: pdfY - clipRect.y * yScale,
+      xScale,
+      yScale,
+    });
+  }
+
+  page.pushOperators(popGraphicsState());
 }
 
 function compactStyleList(styles) {
@@ -624,25 +620,6 @@ function compactStyleList(styles) {
   // Match production naming: BD01485474W+6551W+6575W+...
   const rest = styles.slice(1).map((s) => s.replace(/^BD0148/i, ""));
   return [first, ...rest].join("+");
-}
-
-async function canvasToPngBytes(canvas, orient) {
-  const source = orient === "H" ? rotateCanvasCW(canvas) : canvas;
-  const blob = await new Promise((resolve) => source.toBlob(resolve, "image/png"));
-  if (!blob) throw new Error("Failed to encode label image.");
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
-/** Rotate portrait label 90° clockwise so punch hole sits on the right in H slots. */
-function rotateCanvasCW(canvas) {
-  const out = document.createElement("canvas");
-  out.width = canvas.height;
-  out.height = canvas.width;
-  const ctx = out.getContext("2d");
-  ctx.translate(out.width, 0);
-  ctx.rotate(Math.PI / 2);
-  ctx.drawImage(canvas, 0, 0);
-  return out;
 }
 
 function buildOutputName(styles) {

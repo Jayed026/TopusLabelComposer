@@ -14,6 +14,7 @@ Browser tool that builds plate PDFs from:
 - **Layout slots are detected dynamically** from the uploaded master (portrait + landscape cut rectangles), sorted top→bottom, left→right
 - Excel totals per plate must equal the detected ups count
 - Landscape slots receive artwork rotated 90° clockwise
+- Label artwork is placed as vectors from the outline PDFs (not flattened to images)
 
 ## Run locally
 
