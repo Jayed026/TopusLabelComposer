@@ -12,12 +12,12 @@
 <body>
   <div class="page">
     <header class="hero">
-      <p class="eyebrow">Dunnes 26-up</p>
+      <p class="eyebrow">Dunnes 26-up · M&amp;S 20-up</p>
       <h1>Label Plate Composer</h1>
       <p class="lede">
         Upload outline label PDFs, the ratio Excel, and any compatible master layout PDF.
         Slots are detected from the layout’s cut boxes; Excel maps sizes onto plates A–D.
-        Label art is copied as vectors, so it stays editable in Adobe.
+        Label art is cropped per size as vectors, so Adobe gets clean editable paths.
       </p>
     </header>
 
@@ -31,13 +31,13 @@
 
         <label class="field">
           <span class="field-label">2. Ratio master Excel</span>
-          <span class="field-hint">Defines size, EAN, plate counts (A/B/C/D), and impression totals</span>
+          <span class="field-hint">Defines size or UPC/EAN, plate counts (A/B/C/D), and impression totals</span>
           <input id="excel-file" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
         </label>
 
         <label class="field">
           <span class="field-label">3. Result layout PDF</span>
-          <span class="field-hint">Master template with ~30×74 mm cut boxes — slots are detected automatically from the PDF</span>
+          <span class="field-hint">Master template with ~30×74 / 30×85 mm cut boxes (square or rounded) — slots are detected automatically from the PDF</span>
           <input id="layout-file" type="file" accept="application/pdf,.pdf" required />
         </label>
 
